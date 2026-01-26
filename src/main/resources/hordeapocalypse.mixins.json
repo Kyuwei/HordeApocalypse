@@ -1,0 +1,13 @@
+{
+  "required": true,
+  "minVersion": "0.8",
+  "package": "com.kyuwei.hordeapocalypse.mixin",
+  "compatibilityLevel": "JAVA_21",
+  "mixins": [
+    "MobEntityMixin"
+  ],
+  "client": [],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}

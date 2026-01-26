@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "id": "hordeapocalypse",
+  "version": "${version}",
+  "name": "Horde Apocalypse",
+  "description": "Un mod inspiré de 7 Days to Die avec des hordes progressives tous les 7 jours et une difficulté croissante sur 100 jours.",
+  "authors": [
+    "Kyuwei"
+  ],
+  "contact": {
+    "homepage": "https://github.com/Kyuwei/HordeApocalypse",
+    "sources": "https://github.com/Kyuwei/HordeApocalypse"
+  },
+  "license": "MIT",
+  "icon": "assets/hordeapocalypse/icon.png",
+  "environment": "*",
+  "entrypoints": {
+    "main": [
+      "com.kyuwei.hordeapocalypse.HordeApocalypse"
+    ]
+  },
+  "mixins": [
+    "hordeapocalypse.mixins.json"
+  ],
+  "depends": {
+    "fabricloader": ">=0.16.0",
+    "minecraft": "~1.21.5",
+    "java": ">=21",
+    "fabric-api": "*"
+  }
+}
