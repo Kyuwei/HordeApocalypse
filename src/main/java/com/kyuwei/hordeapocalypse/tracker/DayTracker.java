@@ -2,42 +2,58 @@ package com.kyuwei.hordeapocalypse.tracker;
 
 import com.kyuwei.hordeapocalypse.HordeApocalypse;
 import net.minecraft.server.MinecraftServer;
-import net.minecraft.world.World;
 
+/**
+ * Tracks in-game days using total world time (getTime()), which is persistent
+ * across server restarts — no need for separate save/load.
+ */
 public class DayTracker {
-    private long lastDayTime = 0;
-    private int currentDay = 1;
+    private long lastDayCycle = -1;
     private boolean dayChanged = false;
-    
+
     public void tick(MinecraftServer server) {
-        World overworld = server.getOverworld();
-        long currentTime = overworld.getTimeOfDay();
-        long currentDayTime = currentTime / 24000L;
-        
-        if (currentDayTime > lastDayTime) {
-            lastDayTime = currentDayTime;
-            currentDay++;
+        long totalTime = server.getOverworld().getTime();
+        long currentDayCycle = totalTime / 24000L;
+
+        if (lastDayCycle == -1) {
+            // First tick after server start: initialize without triggering a horde
+            lastDayCycle = currentDayCycle;
+            return;
+        }
+
+        if (currentDayCycle != lastDayCycle) {
+            lastDayCycle = currentDayCycle;
             dayChanged = true;
-            HordeApocalypse.LOGGER.info("Day changed to: " + currentDay);
+            HordeApocalypse.LOGGER.info("Day changed to: {}", getCurrentDay());
         }
     }
-    
+
+    /**
+     * Returns the current day number (1-based).
+     * Derived from total world time so it persists across restarts.
+     */
     public int getCurrentDay() {
-        return currentDay;
+        return (int) Math.max(1, lastDayCycle + 1);
     }
-    
+
+    /**
+     * Checks and consumes the day-changed flag.
+     * Returns true only once per day transition.
+     */
     public boolean hasDayChanged() {
-        boolean result = dayChanged;
-        dayChanged = false;
-        return result;
+        if (dayChanged) {
+            dayChanged = false;
+            return true;
+        }
+        return false;
     }
-    
+
     public boolean isHordeDay() {
         int interval = HordeApocalypse.getConfig().hordeDayInterval;
-        return currentDay % interval == 0;
+        return interval > 0 && getCurrentDay() % interval == 0;
     }
-    
+
     public boolean isFinalDay() {
-        return currentDay == HordeApocalypse.getConfig().maxDifficultyDay;
+        return getCurrentDay() >= HordeApocalypse.getConfig().maxDifficultyDay;
     }
 }
