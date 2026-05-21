@@ -2,45 +2,47 @@ package com.kyuwei.hordeapocalypse.tracker;
 
 import com.kyuwei.hordeapocalypse.HordeApocalypse;
 import net.minecraft.server.MinecraftServer;
+import net.minecraft.server.world.ServerWorld;
 
 /**
- * Tracks in-game days using total world time (getTime()), which is persistent
- * across server restarts — no need for separate save/load.
+ * Derives the current in-game day from the overworld's total world time.
+ * Because total world time is persistent and monotonic, no separate
+ * save/load is required. /time set commands cannot rewind this counter.
  */
 public class DayTracker {
-    private long lastDayCycle = -1;
+    private static final long TICKS_PER_DAY = 24000L;
+    private static final long UNINITIALIZED = Long.MIN_VALUE;
+
+    private long lastObservedDayIndex = UNINITIALIZED;
     private boolean dayChanged = false;
 
     public void tick(MinecraftServer server) {
-        long totalTime = server.getOverworld().getTime();
-        long currentDayCycle = totalTime / 24000L;
+        if (server == null) return;
+        ServerWorld overworld = server.getOverworld();
+        if (overworld == null) return;
 
-        if (lastDayCycle == -1) {
-            // First tick after server start: initialize without triggering a horde
-            lastDayCycle = currentDayCycle;
+        long currentDayIndex = overworld.getTime() / TICKS_PER_DAY;
+
+        if (lastObservedDayIndex == UNINITIALIZED) {
+            lastObservedDayIndex = currentDayIndex;
             return;
         }
 
-        if (currentDayCycle != lastDayCycle) {
-            lastDayCycle = currentDayCycle;
+        if (currentDayIndex > lastObservedDayIndex) {
+            lastObservedDayIndex = currentDayIndex;
             dayChanged = true;
             HordeApocalypse.LOGGER.info("Day changed to: {}", getCurrentDay());
         }
     }
 
-    /**
-     * Returns the current day number (1-based).
-     * Derived from total world time so it persists across restarts.
-     */
+    /** Current day number, 1-based, stable across restarts. */
     public int getCurrentDay() {
-        return (int) Math.max(1, lastDayCycle + 1);
+        long index = lastObservedDayIndex == UNINITIALIZED ? 0 : lastObservedDayIndex;
+        return (int) Math.max(1, index + 1);
     }
 
-    /**
-     * Checks and consumes the day-changed flag.
-     * Returns true only once per day transition.
-     */
-    public boolean hasDayChanged() {
+    /** Reads-and-clears the day-change flag. True exactly once per day transition. */
+    public boolean consumeDayChanged() {
         if (dayChanged) {
             dayChanged = false;
             return true;

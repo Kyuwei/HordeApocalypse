@@ -4,8 +4,7 @@
   "package": "com.kyuwei.hordeapocalypse.mixin",
   "compatibilityLevel": "JAVA_21",
   "mixins": [
-    "MobEntityMixin",
-    "ZombieEntityMixin"
+    "CreeperEntityAccessor"
   ],
   "client": [],
   "injectors": {
