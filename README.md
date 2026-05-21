@@ -2,8 +2,8 @@
 
 <div align="center">
 
-![Minecraft](https://img.shields.io/badge/Minecraft-1.21.5-green.svg)
-![Fabric](https://img.shields.io/badge/Fabric-0.16.9-orange.svg)
+![Minecraft](https://img.shields.io/badge/Minecraft-1.21.11-green.svg)
+![Fabric](https://img.shields.io/badge/Fabric-0.18.1-orange.svg)
 ![License](https://img.shields.io/badge/License-MIT-blue.svg)
 
 *Un mod Minecraft Fabric inspiré de 7 Days to Die*
@@ -62,8 +62,8 @@ Le 100ème jour, en plus de la horde normale :
 
 ### Prérequis
 
-- Minecraft Java Edition **1.21.5**
-- [Fabric Loader](https://fabricmc.net/use/) **0.16.9+**
+- Minecraft Java Edition **1.21.5+** (testé sur **1.21.11**)
+- [Fabric Loader](https://fabricmc.net/use/) **0.18.0+**
 - [Fabric API](https://modrinth.com/mod/fabric-api) **0.110.5+**
 
 ### Étapes
@@ -85,20 +85,24 @@ Le fichier de configuration `hordeapocalypse.json` est généré automatiquement
   "hordeZombieCount": 30,
   "hordeSkeletonCount": 20,
   "hordeCreeperCount": 10,
-  
+
   "woodBreakStartDay": 1,
   "stoneBreakStartDay": 50,
   "hardBreakStartDay": 100,
   "blockBreakSpeed": 0.1,
-  
+  "breakDropsItems": false,
+
   "maxDifficultyDay": 100,
   "maxHealthMultiplier": 3.0,
   "maxDamageMultiplier": 3.0,
   "maxSpeedMultiplier": 1.5,
-  
+
   "finalDayWardenCount": 2,
   "finalDayWitherCount": 3,
-  "finalDayPillagerCount": 50
+  "finalDayPillagerCount": 50,
+
+  "maxConcurrentHordeMobs": 300,
+  "clusterMergeDistance": 100
 }
 ```
 
@@ -115,6 +119,17 @@ Le fichier de configuration `hordeapocalypse.json` est généré automatiquement
 | `maxHealthMultiplier` | Multiplicateur max de santé | 3.0 (300%) |
 | `maxDamageMultiplier` | Multiplicateur max d'attaque | 3.0 (300%) |
 | `maxSpeedMultiplier` | Multiplicateur max de vitesse | 1.5 (150%) |
+| `breakDropsItems` | Les blocs cassés laissent des drops | `false` |
+| `maxConcurrentHordeMobs` | Plafond global de mobs spawnés par horde | 300 |
+| `clusterMergeDistance` | Distance pour fusionner les hordes de joueurs proches | 100 |
+
+## 🛠️ Commandes (admin, perm level 2)
+
+| Commande | Description |
+|----------|-------------|
+| `/hordeapocalypse force` | Démarre immédiatement une horde sur le joueur appelant |
+| `/hordeapocalypse stop` | Termine la horde en cours et nettoie les mobs taggés |
+| `/hordeapocalypse status` | Affiche le jour courant, l'état de la horde et le nombre de mobs |
 
 ## 🛠️ Compilation depuis les sources
 

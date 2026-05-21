@@ -1,143 +1,204 @@
 package com.kyuwei.hordeapocalypse.spawner;
 
 import com.kyuwei.hordeapocalypse.HordeApocalypse;
+import com.kyuwei.hordeapocalypse.ai.BlockBreakGoal;
 import com.kyuwei.hordeapocalypse.config.ModConfig;
+import com.kyuwei.hordeapocalypse.mixin.CreeperEntityAccessor;
+import com.kyuwei.hordeapocalypse.state.HordePersistentState;
+import net.minecraft.entity.Entity;
 import net.minecraft.entity.EntityType;
 import net.minecraft.entity.SpawnReason;
-import net.minecraft.entity.mob.*;
-import net.minecraft.nbt.NbtCompound;
-import net.minecraft.server.network.ServerPlayerEntity;
+import net.minecraft.entity.mob.CreeperEntity;
+import net.minecraft.entity.mob.MobEntity;
 import net.minecraft.server.world.ServerWorld;
+import net.minecraft.util.TypeFilter;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Vec3d;
+import net.minecraft.util.math.random.Random;
 import net.minecraft.world.Heightmap;
 
-import java.util.ArrayList;
 import java.util.List;
-import java.util.Random;
+import java.util.UUID;
 
-public class HordeSpawner {
-    /** Command tag persisted in entity NBT — survives server restarts */
+public final class HordeSpawner {
+    /** Persistent command tag identifying horde mobs across restarts. */
     public static final String HORDE_TAG = "HordeMob";
 
-    public static void spawnHorde(ServerWorld world, ServerPlayerEntity player, int day) {
+    private static final int SPAWN_ATTEMPTS = 12;
+    private static final int RADIUS_JITTER = 30;
+
+    private HordeSpawner() {}
+
+    /**
+     * Spawns the horde composition around the player, respecting the global
+     * concurrent-mob budget. Returns the number of mobs actually spawned.
+     */
+    public static int spawnHorde(ServerWorld world, Vec3d center, int day, int globalBudget) {
+        if (globalBudget <= 0) return 0;
         ModConfig config = HordeApocalypse.getConfig();
-        Random random = new Random();
-        Vec3d playerPos = player.getPos();
+        HordePersistentState state = HordePersistentState.get(world);
+        Random random = world.getRandom();
 
-        // Spawn zombies
-        for (int i = 0; i < config.hordeZombieCount; i++) {
-            spawnMob(world, EntityType.ZOMBIE, playerPos, config.hordeSpawnDistance, random);
+        int spawned = 0;
+        int remaining = globalBudget;
+
+        spawned += spawnBatch(world, EntityType.ZOMBIE, center, config.hordeZombieCount,
+                              config.hordeSpawnDistance, random, state, remaining);
+        remaining = globalBudget - spawned;
+
+        spawned += spawnBatch(world, EntityType.SKELETON, center, config.hordeSkeletonCount,
+                              config.hordeSpawnDistance, random, state, remaining);
+        remaining = globalBudget - spawned;
+
+        spawned += spawnCreeperBatch(world, center, config.hordeCreeperCount,
+                                     config.hordeSpawnDistance, random, state, remaining);
+        remaining = globalBudget - spawned;
+
+        if (day >= config.maxDifficultyDay) {
+            spawned += spawnBatch(world, EntityType.WARDEN, center, config.finalDayWardenCount,
+                                  config.hordeSpawnDistance, random, state, remaining);
+            remaining = globalBudget - spawned;
+
+            spawned += spawnBatch(world, EntityType.WITHER, center, config.finalDayWitherCount,
+                                  config.hordeSpawnDistance + 50, random, state, remaining);
+            remaining = globalBudget - spawned;
+
+            spawned += spawnBatch(world, EntityType.PILLAGER, center, config.finalDayPillagerCount,
+                                  config.hordeSpawnDistance, random, state, remaining);
         }
 
-        // Spawn skeletons
-        for (int i = 0; i < config.hordeSkeletonCount; i++) {
-            spawnMob(world, EntityType.SKELETON, playerPos, config.hordeSpawnDistance, random);
-        }
+        state.markDirty();
+        return spawned;
+    }
 
-        // Spawn charged creepers
-        for (int i = 0; i < config.hordeCreeperCount; i++) {
-            MobEntity creeper = spawnMob(world, EntityType.CREEPER, playerPos, config.hordeSpawnDistance, random);
-            if (creeper instanceof CreeperEntity creeperEntity) {
-                NbtCompound nbt = new NbtCompound();
-                creeperEntity.writeNbt(nbt);
-                nbt.putBoolean("powered", true);
-                creeperEntity.readNbt(nbt);
+    private static int spawnBatch(ServerWorld world, EntityType<? extends MobEntity> type, Vec3d center,
+                                  int count, int radius, Random random, HordePersistentState state, int budget) {
+        int actual = Math.min(count, budget);
+        int spawned = 0;
+        for (int i = 0; i < actual; i++) {
+            MobEntity mob = spawnMob(world, type, center, radius, random);
+            if (mob != null) {
+                state.hordeMobIds.add(mob.getUuid());
+                spawned++;
             }
         }
+        return spawned;
+    }
 
-        // Day 100+: final bosses
-        if (day >= config.maxDifficultyDay) {
-            spawnFinalDayBosses(world, playerPos, config, random);
+    private static int spawnCreeperBatch(ServerWorld world, Vec3d center, int count, int radius,
+                                         Random random, HordePersistentState state, int budget) {
+        int actual = Math.min(count, budget);
+        int spawned = 0;
+        for (int i = 0; i < actual; i++) {
+            MobEntity mob = spawnMob(world, EntityType.CREEPER, center, radius, random);
+            if (mob instanceof CreeperEntity creeper) {
+                creeper.getDataTracker().set(CreeperEntityAccessor.getChargedKey(), true);
+                state.hordeMobIds.add(creeper.getUuid());
+                spawned++;
+            }
         }
+        return spawned;
     }
 
     /**
-     * Spawn a single horde mob at a valid surface position near the player.
-     * Returns the mob, or null if spawning failed.
+     * Spawns one mob at a validated surface position. Returns null if no valid
+     * position is found in the loaded area.
      */
     private static MobEntity spawnMob(ServerWorld world, EntityType<? extends MobEntity> type,
-                                       Vec3d center, int radius, Random random) {
-        BlockPos spawnPos = findValidSpawnPos(world, center, radius, random);
-        if (spawnPos == null) {
+                                      Vec3d center, int radius, Random random) {
+        BlockPos pos = findValidSpawnPos(world, center, radius, random);
+        if (pos == null) return null;
+
+        Entity created = type.create(world, SpawnReason.EVENT);
+        if (!(created instanceof MobEntity mob)) {
+            if (created != null) created.discard();
             return null;
         }
 
-        MobEntity mob = type.create(world, SpawnReason.EVENT);
-        if (mob == null) {
-            return null;
-        }
-
-        mob.refreshPositionAndAngles(spawnPos, random.nextFloat() * 360.0f, 0);
+        mob.refreshPositionAndAngles(pos, random.nextFloat() * 360.0f, 0);
         mob.setPersistent();
         mob.addCommandTag(HORDE_TAG);
-        world.spawnEntity(mob);
+        // Attach block-breaking AI dynamically to every horde mob (zombie,
+        // skeleton, creeper, pillager, warden). Avoids polluting unrelated
+        // mobs via a global mixin.
+        mob.goalSelector.add(3, new BlockBreakGoal(mob));
+
+        if (!world.spawnEntity(mob)) {
+            return null;
+        }
         return mob;
     }
 
-    private static void spawnFinalDayBosses(ServerWorld world, Vec3d playerPos, ModConfig config, Random random) {
-        // Wardens
-        for (int i = 0; i < config.finalDayWardenCount; i++) {
-            spawnMob(world, EntityType.WARDEN, playerPos, config.hordeSpawnDistance, random);
-        }
-
-        // Withers (spawn further away for safety)
-        for (int i = 0; i < config.finalDayWitherCount; i++) {
-            spawnMob(world, EntityType.WITHER, playerPos, config.hordeSpawnDistance + 50, random);
-        }
-
-        // Pillagers
-        for (int i = 0; i < config.finalDayPillagerCount; i++) {
-            spawnMob(world, EntityType.PILLAGER, playerPos, config.hordeSpawnDistance, random);
-        }
-    }
-
     /**
-     * Find a valid spawn position on the world surface with 2 blocks of air space.
-     * Tries up to 10 random positions before falling back.
+     * Picks a valid spawn position around the center. Tries multiple random
+     * directions, only on loaded chunks, with 2-block air clearance.
      */
     private static BlockPos findValidSpawnPos(ServerWorld world, Vec3d center, int radius, Random random) {
-        for (int attempt = 0; attempt < 10; attempt++) {
-            double angle = random.nextDouble() * 2 * Math.PI;
-            double distance = radius + random.nextInt(30);
+        for (int attempt = 0; attempt < SPAWN_ATTEMPTS; attempt++) {
+            double angle = random.nextDouble() * (2 * Math.PI);
+            double distance = radius + random.nextInt(RADIUS_JITTER);
+            int x = (int) Math.round(center.x + Math.cos(angle) * distance);
+            int z = (int) Math.round(center.z + Math.sin(angle) * distance);
 
-            int x = (int) (center.x + Math.cos(angle) * distance);
-            int z = (int) (center.z + Math.sin(angle) * distance);
+            int chunkX = x >> 4;
+            int chunkZ = z >> 4;
+            if (!world.getChunkManager().isChunkLoaded(chunkX, chunkZ)) {
+                continue;
+            }
 
-            BlockPos surfacePos = world.getTopPosition(
-                    Heightmap.Type.MOTION_BLOCKING_NO_LEAVES, new BlockPos(x, 0, z));
+            BlockPos surface = world.getTopPosition(Heightmap.Type.MOTION_BLOCKING_NO_LEAVES, new BlockPos(x, 0, z));
+            if (!isValidSurface(world, surface)) {
+                continue;
+            }
+            return surface;
+        }
+        return null;
+    }
 
-            // Verify 2-block clearance for the mob
-            if (world.getBlockState(surfacePos).isAir()
-                    && world.getBlockState(surfacePos.up()).isAir()) {
-                return surfacePos;
+    private static boolean isValidSurface(ServerWorld world, BlockPos pos) {
+        if (pos.getY() <= world.getBottomY() + 1) return false;
+        // Spot must have 2 blocks of air for mob clearance.
+        if (!world.getBlockState(pos).isAir()) return false;
+        if (!world.getBlockState(pos.up()).isAir()) return false;
+        // Block directly below must be solid (not fluid, not air, not leaves).
+        var below = world.getBlockState(pos.down());
+        if (below.isAir() || !below.getFluidState().isEmpty()) return false;
+        return true;
+    }
+
+    /**
+     * Removes all currently-tracked horde mobs from the world.
+     * Falls back to scanning by command tag for survivors loaded after a
+     * crash (lookup by UUID may miss entities that aren't yet in memory).
+     */
+    public static int clearHordeMobs(ServerWorld world) {
+        HordePersistentState state = HordePersistentState.get(world);
+        int removed = 0;
+
+        // First: targeted removal via tracked UUIDs.
+        for (UUID id : List.copyOf(state.hordeMobIds)) {
+            Entity entity = world.getEntity(id);
+            if (entity != null) {
+                entity.discard();
+                removed++;
             }
         }
+        state.hordeMobIds.clear();
 
-        // Fallback: cardinal direction at exact radius
-        int x = (int) center.x + radius;
-        int z = (int) center.z;
-        return world.getTopPosition(Heightmap.Type.MOTION_BLOCKING_NO_LEAVES, new BlockPos(x, 0, z));
+        // Then: belt-and-braces sweep by tag, catches any mob whose UUID
+        // wasn't tracked (e.g. surviving a corrupted save).
+        List<MobEntity> tagged = world.getEntitiesByType(
+                TypeFilter.instanceOf(MobEntity.class),
+                mob -> mob.getCommandTags().contains(HORDE_TAG));
+        for (MobEntity mob : tagged) {
+            mob.discard();
+            removed++;
+        }
+
+        state.markDirty();
+        return removed;
     }
 
-    /**
-     * Remove all horde mobs from the world. Collects into a list first
-     * to avoid ConcurrentModificationException during iteration.
-     */
-    public static void clearHordeMobs(ServerWorld world) {
-        List<MobEntity> toRemove = new ArrayList<>();
-        world.iterateEntities().forEach(entity -> {
-            if (entity instanceof MobEntity mob && isHordeMob(mob)) {
-                toRemove.add(mob);
-            }
-        });
-        toRemove.forEach(MobEntity::discard);
-    }
-
-    /**
-     * Check whether a mob is part of a horde. Uses command tags which are
-     * persisted in entity NBT, so this survives server restarts.
-     */
     public static boolean isHordeMob(MobEntity mob) {
         return mob.getCommandTags().contains(HORDE_TAG);
     }
