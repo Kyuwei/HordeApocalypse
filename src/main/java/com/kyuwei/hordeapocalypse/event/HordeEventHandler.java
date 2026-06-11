@@ -108,7 +108,7 @@ public final class HordeEventHandler {
         // other dimensions.
         List<ServerPlayerEntity> eligible = new ArrayList<>();
         for (ServerPlayerEntity player : targets) {
-            if (player.getWorld().getRegistryKey() == World.OVERWORLD) {
+            if (player.getEntityWorld().getRegistryKey() == World.OVERWORLD) {
                 eligible.add(player);
             }
         }
@@ -148,16 +148,17 @@ public final class HordeEventHandler {
         int[] parent = new int[n];
         for (int i = 0; i < n; i++) parent[i] = i;
 
-        double mergeSq = mergeDistance <= 0 ? -1.0 : (double) mergeDistance * mergeDistance;
-        for (int i = 0; i < n; i++) {
-            for (int j = i + 1; j < n; j++) {
-                if (mergeSq < 0) break;
-                Vec3d a = players.get(i).getPos();
-                Vec3d b = players.get(j).getPos();
-                double dx = a.x - b.x;
-                double dz = a.z - b.z;
-                if (dx * dx + dz * dz <= mergeSq) {
-                    union(parent, i, j);
+        if (mergeDistance > 0) {
+            double mergeSq = (double) mergeDistance * mergeDistance;
+            for (int i = 0; i < n; i++) {
+                for (int j = i + 1; j < n; j++) {
+                    Vec3d a = players.get(i).getEntityPos();
+                    Vec3d b = players.get(j).getEntityPos();
+                    double dx = a.x - b.x;
+                    double dz = a.z - b.z;
+                    if (dx * dx + dz * dz <= mergeSq) {
+                        union(parent, i, j);
+                    }
                 }
             }
         }
@@ -172,7 +173,7 @@ public final class HordeEventHandler {
             if (group.isEmpty()) continue;
             double cx = 0, cy = 0, cz = 0;
             for (ServerPlayerEntity p : group) {
-                Vec3d pos = p.getPos();
+                Vec3d pos = p.getEntityPos();
                 cx += pos.x; cy += pos.y; cz += pos.z;
             }
             int size = group.size();

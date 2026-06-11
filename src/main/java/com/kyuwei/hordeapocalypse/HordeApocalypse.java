@@ -34,6 +34,9 @@ public class HordeApocalypse implements ModInitializer {
             HordeEventHandler.onServerTick(server);
         });
 
+        // In singleplayer the mod instance survives across world loads:
+        // reset day tracking each time a server starts.
+        ServerLifecycleEvents.SERVER_STARTING.register(server -> dayTracker.reset());
         ServerLifecycleEvents.SERVER_STOPPING.register(HordeEventHandler::onServerStopping);
 
         LOGGER.info("Horde Apocalypse mod initialized");

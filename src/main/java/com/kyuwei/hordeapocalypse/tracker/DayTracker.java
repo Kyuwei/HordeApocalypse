@@ -41,6 +41,17 @@ public class DayTracker {
         return (int) Math.max(1, index + 1);
     }
 
+    /**
+     * Clears all state. Must be called when a server starts, because in
+     * singleplayer the same mod instance survives across world loads — without
+     * a reset, opening a world with a smaller total time than the previous one
+     * would freeze day detection and report the wrong day.
+     */
+    public void reset() {
+        lastObservedDayIndex = UNINITIALIZED;
+        dayChanged = false;
+    }
+
     /** Reads-and-clears the day-change flag. True exactly once per day transition. */
     public boolean consumeDayChanged() {
         if (dayChanged) {

@@ -4,6 +4,7 @@ import com.kyuwei.hordeapocalypse.HordeApocalypse;
 import com.kyuwei.hordeapocalypse.ai.BlockBreakGoal;
 import com.kyuwei.hordeapocalypse.config.ModConfig;
 import com.kyuwei.hordeapocalypse.mixin.CreeperEntityAccessor;
+import com.kyuwei.hordeapocalypse.mixin.MobEntityAccessor;
 import com.kyuwei.hordeapocalypse.state.HordePersistentState;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.EntityType;
@@ -26,6 +27,8 @@ public final class HordeSpawner {
 
     private static final int SPAWN_ATTEMPTS = 12;
     private static final int RADIUS_JITTER = 30;
+    /** Never spawn closer than this, even when falling back toward the player. */
+    private static final int MIN_SPAWN_DISTANCE = 32;
 
     private HordeSpawner() {}
 
@@ -40,31 +43,21 @@ public final class HordeSpawner {
         Random random = world.getRandom();
 
         int spawned = 0;
-        int remaining = globalBudget;
 
         spawned += spawnBatch(world, EntityType.ZOMBIE, center, config.hordeZombieCount,
-                              config.hordeSpawnDistance, random, state, remaining);
-        remaining = globalBudget - spawned;
-
+                              config.hordeSpawnDistance, random, state, globalBudget - spawned);
         spawned += spawnBatch(world, EntityType.SKELETON, center, config.hordeSkeletonCount,
-                              config.hordeSpawnDistance, random, state, remaining);
-        remaining = globalBudget - spawned;
-
+                              config.hordeSpawnDistance, random, state, globalBudget - spawned);
         spawned += spawnCreeperBatch(world, center, config.hordeCreeperCount,
-                                     config.hordeSpawnDistance, random, state, remaining);
-        remaining = globalBudget - spawned;
+                                     config.hordeSpawnDistance, random, state, globalBudget - spawned);
 
         if (day >= config.maxDifficultyDay) {
             spawned += spawnBatch(world, EntityType.WARDEN, center, config.finalDayWardenCount,
-                                  config.hordeSpawnDistance, random, state, remaining);
-            remaining = globalBudget - spawned;
-
+                                  config.hordeSpawnDistance, random, state, globalBudget - spawned);
             spawned += spawnBatch(world, EntityType.WITHER, center, config.finalDayWitherCount,
-                                  config.hordeSpawnDistance + 50, random, state, remaining);
-            remaining = globalBudget - spawned;
-
+                                  config.hordeSpawnDistance + 50, random, state, globalBudget - spawned);
             spawned += spawnBatch(world, EntityType.PILLAGER, center, config.finalDayPillagerCount,
-                                  config.hordeSpawnDistance, random, state, remaining);
+                                  config.hordeSpawnDistance, random, state, globalBudget - spawned);
         }
 
         state.markDirty();
@@ -120,8 +113,8 @@ public final class HordeSpawner {
         mob.addCommandTag(HORDE_TAG);
         // Attach block-breaking AI dynamically to every horde mob (zombie,
         // skeleton, creeper, pillager, warden). Avoids polluting unrelated
-        // mobs via a global mixin.
-        mob.goalSelector.add(3, new BlockBreakGoal(mob));
+        // mobs via a global mixin. goalSelector is protected, hence the accessor.
+        ((MobEntityAccessor) mob).getGoalSelector().add(3, new BlockBreakGoal(mob));
 
         if (!world.spawnEntity(mob)) {
             return null;
@@ -132,11 +125,18 @@ public final class HordeSpawner {
     /**
      * Picks a valid spawn position around the center. Tries multiple random
      * directions, only on loaded chunks, with 2-block air clearance.
+     * <p>
+     * The configured spawn distance (200 by default) usually exceeds the
+     * loaded-chunk radius (default view distance 10 chunks = 160 blocks), so
+     * later attempts shrink toward the player rather than force-loading
+     * chunks or silently failing.
      */
     private static BlockPos findValidSpawnPos(ServerWorld world, Vec3d center, int radius, Random random) {
         for (int attempt = 0; attempt < SPAWN_ATTEMPTS; attempt++) {
             double angle = random.nextDouble() * (2 * Math.PI);
-            double distance = radius + random.nextInt(RADIUS_JITTER);
+            // 100% of the radius on the first attempt, down to 25% on the last.
+            double shrink = 1.0 - 0.75 * attempt / (double) (SPAWN_ATTEMPTS - 1);
+            double distance = Math.max(MIN_SPAWN_DISTANCE, radius * shrink + random.nextInt(RADIUS_JITTER));
             int x = (int) Math.round(center.x + Math.cos(angle) * distance);
             int z = (int) Math.round(center.z + Math.sin(angle) * distance);
 

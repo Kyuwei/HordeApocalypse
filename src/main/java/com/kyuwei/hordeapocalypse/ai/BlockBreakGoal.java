@@ -66,7 +66,7 @@ public class BlockBreakGoal extends Goal {
     @Override
     public boolean shouldContinue() {
         if (targetPos == null) return false;
-        BlockState state = mob.getWorld().getBlockState(targetPos);
+        BlockState state = mob.getEntityWorld().getBlockState(targetPos);
         if (state.isAir() || !canBreakBlock(state)) return false;
 
         double distSq = mob.squaredDistanceTo(
@@ -91,13 +91,13 @@ public class BlockBreakGoal extends Goal {
 
         breakProgress++;
         int stage = Math.min((int) ((float) breakProgress / totalBreakTicks * 10.0f), 9);
-        mob.getWorld().setBlockBreakingInfo(mob.getId(), targetPos, stage);
+        mob.getEntityWorld().setBlockBreakingInfo(mob.getId(), targetPos, stage);
 
         if (breakProgress >= totalBreakTicks) {
             ModConfig config = HordeApocalypse.getConfig();
             boolean drops = config != null && config.breakDropsItems;
-            mob.getWorld().breakBlock(targetPos, drops, mob);
-            mob.getWorld().setBlockBreakingInfo(mob.getId(), targetPos, -1);
+            mob.getEntityWorld().breakBlock(targetPos, drops, mob);
+            mob.getEntityWorld().setBlockBreakingInfo(mob.getId(), targetPos, -1);
             targetPos = null;
             checkCooldown = 5;
         }
@@ -106,7 +106,7 @@ public class BlockBreakGoal extends Goal {
     @Override
     public void stop() {
         if (targetPos != null) {
-            mob.getWorld().setBlockBreakingInfo(mob.getId(), targetPos, -1);
+            mob.getEntityWorld().setBlockBreakingInfo(mob.getId(), targetPos, -1);
         }
         targetPos = null;
         breakProgress = 0;
@@ -119,8 +119,8 @@ public class BlockBreakGoal extends Goal {
      */
     private BlockPos findBlockInPath(LivingEntity target) {
         BlockPos mobPos = mob.getBlockPos();
-        World world = mob.getWorld();
-        Vec3d direction = target.getPos().subtract(mob.getPos());
+        World world = mob.getEntityWorld();
+        Vec3d direction = target.getEntityPos().subtract(mob.getEntityPos());
 
         double absX = Math.abs(direction.x);
         double absZ = Math.abs(direction.z);
