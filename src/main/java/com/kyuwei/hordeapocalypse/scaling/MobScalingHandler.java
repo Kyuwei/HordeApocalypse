@@ -3,67 +3,75 @@ package com.kyuwei.hordeapocalypse.scaling;
 import com.kyuwei.hordeapocalypse.HordeApocalypse;
 import com.kyuwei.hordeapocalypse.config.ModConfig;
 import com.kyuwei.hordeapocalypse.tracker.DayTracker;
-import net.fabricmc.fabric.api.event.lifecycle.v1.ServerEntityEvents;
-import net.minecraft.entity.Entity;
-import net.minecraft.entity.attribute.EntityAttribute;
-import net.minecraft.entity.attribute.EntityAttributeInstance;
-import net.minecraft.entity.attribute.EntityAttributes;
-import net.minecraft.entity.mob.HostileEntity;
-import net.minecraft.entity.mob.MobEntity;
-import net.minecraft.registry.entry.RegistryEntry;
-import net.minecraft.server.world.ServerWorld;
+import net.minecraft.core.Holder;
+import net.minecraft.resources.Identifier;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.entity.ai.attributes.Attribute;
+import net.minecraft.world.entity.ai.attributes.AttributeInstance;
+import net.minecraft.world.entity.ai.attributes.AttributeModifier;
+import net.minecraft.world.entity.ai.attributes.Attributes;
+import net.minecraft.world.entity.monster.Monster;
 
 /**
- * Idempotent scaling of hostile mobs.
- * <p>
- * Triggered once per mob via {@link ServerEntityEvents#ENTITY_LOAD}. A
- * persistent command tag {@code HAScaled} prevents re-scaling on load —
- * critical, because the original mixin re-multiplied attributes every time
- * the entity was constructed, causing exponential growth across restarts.
+ * Scales hostile mobs with the survival day.
+ *
+ * <p>The scaling is expressed as <em>transient attribute modifiers</em> keyed by
+ * a stable id rather than by multiplying the base value. That matters: the
+ * original implementation multiplied the base attribute on every entity
+ * construction, so a zombie's health compounded (x3, then x9, then x27...) every
+ * time the world was reloaded. Transient modifiers are never written to disk and
+ * are recomputed from the current day each time the mob loads, which makes the
+ * operation naturally idempotent and keeps mobs progressing over time.
  */
 public final class MobScalingHandler {
-    public static final String SCALED_TAG = "HAScaled";
+    private static final Identifier HEALTH_ID =
+            Identifier.fromNamespaceAndPath(HordeApocalypse.MOD_ID, "day_scaling_health");
+    private static final Identifier DAMAGE_ID =
+            Identifier.fromNamespaceAndPath(HordeApocalypse.MOD_ID, "day_scaling_damage");
+    private static final Identifier SPEED_ID =
+            Identifier.fromNamespaceAndPath(HordeApocalypse.MOD_ID, "day_scaling_speed");
 
     private MobScalingHandler() {}
 
-    public static void register() {
-        ServerEntityEvents.ENTITY_LOAD.register(MobScalingHandler::onEntityLoad);
-    }
-
-    private static void onEntityLoad(Entity entity, ServerWorld world) {
-        if (!(entity instanceof HostileEntity hostile)) return;
-        if (hostile.getCommandTags().contains(SCALED_TAG)) return;
+    public static void applyScaling(Entity entity, ServerLevel level) {
+        if (!(entity instanceof Monster monster)) return;
 
         ModConfig config = HordeApocalypse.getConfig();
         DayTracker tracker = HordeApocalypse.getDayTracker();
-        if (config == null || tracker == null) return;
+        // Before the tracker has seen the world the reported day is a
+        // placeholder; scaling now would freeze every mob loaded at startup.
+        if (config == null || tracker == null || !tracker.isInitialised()) return;
 
-        int currentDay = tracker.getCurrentDay();
-        if (currentDay <= 1) {
-            // Day 1: multipliers are 1.0 anyway, but still tag to avoid re-checking.
-            hostile.addCommandTag(SCALED_TAG);
-            return;
+        int day = tracker.getCurrentDay();
+        boolean wasAtFullHealth = monster.getHealth() >= monster.getMaxHealth() - 1.0e-4f;
+
+        applyMultiplier(monster, Attributes.MAX_HEALTH, HEALTH_ID, config.getHealthMultiplier(day));
+        applyMultiplier(monster, Attributes.ATTACK_DAMAGE, DAMAGE_ID, config.getDamageMultiplier(day));
+        applyMultiplier(monster, Attributes.MOVEMENT_SPEED, SPEED_ID, config.getSpeedMultiplier(day));
+
+        // Top the mob up only if it was undamaged, so a wounded mob is not
+        // silently healed every time its chunk reloads.
+        if (wasAtFullHealth) {
+            monster.setHealth(monster.getMaxHealth());
         }
-
-        applyMultiplier(hostile, EntityAttributes.MAX_HEALTH,
-                        config.getHealthMultiplier(currentDay), true);
-        applyMultiplier(hostile, EntityAttributes.ATTACK_DAMAGE,
-                        config.getDamageMultiplier(currentDay), false);
-        applyMultiplier(hostile, EntityAttributes.MOVEMENT_SPEED,
-                        config.getSpeedMultiplier(currentDay), false);
-
-        hostile.addCommandTag(SCALED_TAG);
     }
 
-    private static void applyMultiplier(MobEntity mob,
-                                        RegistryEntry<EntityAttribute> attribute,
-                                        double multiplier, boolean fullyHeal) {
-        EntityAttributeInstance instance = mob.getAttributeInstance(attribute);
-        if (instance == null || multiplier == 1.0) return;
-        double scaled = instance.getBaseValue() * multiplier;
-        instance.setBaseValue(scaled);
-        if (fullyHeal) {
-            mob.setHealth((float) scaled);
+    private static void applyMultiplier(LivingEntity entity, Holder<Attribute> attribute,
+                                        Identifier id, double multiplier) {
+        AttributeInstance instance = entity.getAttribute(attribute);
+        // Skeletons, creepers and the Wither have no ATTACK_DAMAGE attribute:
+        // their damage comes from projectiles and explosions, so the attack
+        // multiplier legitimately does nothing for them.
+        if (instance == null) return;
+
+        double amount = multiplier - 1.0;
+        if (amount <= 0.0) {
+            instance.removeModifier(id);
+            return;
         }
+        instance.addOrUpdateTransientModifier(
+                new AttributeModifier(id, amount, AttributeModifier.Operation.ADD_MULTIPLIED_BASE));
     }
 }

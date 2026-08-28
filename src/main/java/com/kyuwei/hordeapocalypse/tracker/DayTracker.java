@@ -1,61 +1,96 @@
 package com.kyuwei.hordeapocalypse.tracker;
 
 import com.kyuwei.hordeapocalypse.HordeApocalypse;
+import com.kyuwei.hordeapocalypse.config.ModConfig;
 import net.minecraft.server.MinecraftServer;
-import net.minecraft.server.world.ServerWorld;
+import net.minecraft.server.level.ServerLevel;
 
 /**
- * Derives the current in-game day from the overworld's total world time.
- * Because total world time is persistent and monotonic, no separate
- * save/load is required. /time set commands cannot rewind this counter.
+ * Tracks the survival day.
+ *
+ * <p>The day number is derived from {@link ServerLevel#getGameTime()}, the
+ * monotonic tick counter. Unlike the visual clock it cannot be rewound with
+ * {@code /time set} nor frozen by {@code doDaylightCycle}, so the horde schedule
+ * cannot be gamed. The flip side is that it drifts away from the clock players
+ * see whenever they sleep or an operator changes the time — {@code
+ * /hordeapocalypse day <n>} exists to realign it for testing and support.
  */
 public class DayTracker {
     private static final long TICKS_PER_DAY = 24000L;
     private static final long UNINITIALIZED = Long.MIN_VALUE;
 
     private long lastObservedDayIndex = UNINITIALIZED;
-    private boolean dayChanged = false;
+    /** Operator-supplied offset, in days, applied on top of the derived day. */
+    private int dayOffset = 0;
+    private boolean initialised = false;
 
     public void tick(MinecraftServer server) {
         if (server == null) return;
-        ServerWorld overworld = server.getOverworld();
+        ServerLevel overworld = server.overworld();
         if (overworld == null) return;
 
-        long currentDayIndex = overworld.getTime() / TICKS_PER_DAY;
+        long currentDayIndex = overworld.getGameTime() / TICKS_PER_DAY;
 
         if (lastObservedDayIndex == UNINITIALIZED) {
             lastObservedDayIndex = currentDayIndex;
+            initialised = true;
             return;
         }
 
-        if (currentDayIndex > lastObservedDayIndex) {
+        if (currentDayIndex != lastObservedDayIndex) {
             lastObservedDayIndex = currentDayIndex;
-            dayChanged = true;
-            HordeApocalypse.LOGGER.info("Day changed to: {}", getCurrentDay());
+            HordeApocalypse.LOGGER.info("Survival day is now {}", getCurrentDay());
         }
     }
 
-    /** Current day number, 1-based, stable across restarts. */
+    /** Current survival day, 1-based. */
     public int getCurrentDay() {
         long index = lastObservedDayIndex == UNINITIALIZED ? 0 : lastObservedDayIndex;
-        return (int) Math.max(1, index + 1);
+        long day = index + 1 + dayOffset;
+        return (int) Math.max(1, Math.min(Integer.MAX_VALUE, day));
     }
 
-    /** Reads-and-clears the day-change flag. True exactly once per day transition. */
-    public boolean consumeDayChanged() {
-        if (dayChanged) {
-            dayChanged = false;
-            return true;
-        }
-        return false;
+    /**
+     * True once the tracker has seen the world at least one tick. Until then the
+     * reported day is a placeholder and must not be used to bake in mob scaling.
+     */
+    public boolean isInitialised() {
+        return initialised;
     }
 
+    /** Shifts the reported day so it becomes {@code targetDay}. Debug aid. */
+    public void setCurrentDay(int targetDay) {
+        dayOffset += targetDay - getCurrentDay();
+    }
+
+    /**
+     * Clears all state. Called when a server starts: in singleplayer the mod
+     * instance outlives a world, and a world with a smaller game time would
+     * otherwise report the previous world's day.
+     */
+    public void reset() {
+        lastObservedDayIndex = UNINITIALIZED;
+        dayOffset = 0;
+        initialised = false;
+    }
+
+    /**
+     * Whether today brings a horde. Besides every {@code hordeDayInterval} days,
+     * the final day itself always qualifies — otherwise the day-100 apocalypse
+     * would never fire, 100 not being a multiple of 7.
+     */
     public boolean isHordeDay() {
-        int interval = HordeApocalypse.getConfig().hordeDayInterval;
-        return interval > 0 && getCurrentDay() % interval == 0;
+        ModConfig config = HordeApocalypse.getConfig();
+        if (config == null) return false;
+        int day = getCurrentDay();
+        if (day == config.maxDifficultyDay) return true;
+        int interval = config.hordeDayInterval;
+        return interval > 0 && day % interval == 0;
     }
 
-    public boolean isFinalDay() {
-        return getCurrentDay() >= HordeApocalypse.getConfig().maxDifficultyDay;
+    /** Whether the day-100 bosses should join the horde. */
+    public boolean isApocalypseDay() {
+        ModConfig config = HordeApocalypse.getConfig();
+        return config != null && getCurrentDay() >= config.maxDifficultyDay;
     }
 }
