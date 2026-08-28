@@ -32,9 +32,6 @@ import java.util.UUID;
  * one tick is a guaranteed lag spike at the start of every horde night.
  */
 public final class HordeSpawner {
-    /** Persistent tag identifying horde mobs across restarts. */
-    public static final String HORDE_TAG = "hordeapocalypse.horde";
-
     private static final int SPAWN_ATTEMPTS = 12;
     private static final int RADIUS_JITTER = 30;
     private static final int MIN_SPAWN_DISTANCE = 32;
@@ -100,8 +97,7 @@ public final class HordeSpawner {
 
         for (int i = 0; i < budget && !QUEUE.isEmpty(); i++) {
             PendingSpawn pending = QUEUE.poll();
-            Mob mob = spawnMob(level, pending);
-            if (mob != null) state.trackMob(mob.getUUID());
+            spawnMob(level, state, pending);
         }
     }
 
@@ -113,7 +109,7 @@ public final class HordeSpawner {
         return QUEUE.size();
     }
 
-    private static Mob spawnMob(ServerLevel level, PendingSpawn pending) {
+    private static Mob spawnMob(ServerLevel level, HordeState state, PendingSpawn pending) {
         RandomSource random = level.getRandom();
         BlockPos pos = findValidSpawnPos(level, pending.center(), pending.radius(), random);
         if (pos == null) return null;
@@ -121,20 +117,21 @@ public final class HordeSpawner {
         Mob mob = pending.type().create(level, EntitySpawnReason.EVENT);
         if (mob == null) return null;
 
-        mob.moveTo(pos, random.nextFloat() * 360.0f, 0.0f);
+        mob.snapTo(new Vec3(pos.getX() + 0.5, pos.getY(), pos.getZ() + 0.5));
         // Without finalizeSpawn a skeleton has no bow and a pillager no
         // crossbow: they spawn unarmed and cannot attack at all.
         mob.finalizeSpawn(level, level.getCurrentDifficultyAt(pos), EntitySpawnReason.EVENT, null);
         mob.setPersistenceRequired();
-        // Tag before spawning: the entity-load handler keys off it to attach
-        // the horde AI, and it fires from inside addFreshEntity.
-        mob.addTag(HORDE_TAG);
 
         if (pending.charged() && mob instanceof Creeper creeper) {
             creeper.getEntityData().set(CreeperAccessor.getPoweredKey(), true);
         }
 
+        // Track before spawning: the entity-load handler keys off the tracked
+        // set to attach the horde AI, and it fires from inside addFreshEntity.
+        state.trackMob(mob.getUUID());
         if (!level.addFreshEntity(mob)) {
+            state.untrackMob(mob.getUUID());
             mob.discard();
             return null;
         }
@@ -197,9 +194,12 @@ public final class HordeSpawner {
     }
 
     /**
-     * Removes every tracked horde mob that is currently loaded. Mobs sitting in
-     * unloaded chunks cannot be reached here; they are disposed of when they
-     * next load, see {@code HordeApocalypse}'s entity-load handler.
+     * Removes every tracked horde mob that is currently loaded.
+     *
+     * <p>Mobs sitting in unloaded chunks cannot be reached from here, so their
+     * ids deliberately stay in the tracked set: they are marked persistent and
+     * nothing else would ever remove them. They are destroyed the moment they
+     * load again, see {@code HordeApocalypse}'s entity-load handler.
      */
     public static int clearHordeMobs(ServerLevel level) {
         clearQueue();
@@ -209,14 +209,11 @@ public final class HordeSpawner {
             Entity entity = level.getEntity(id);
             if (entity != null) {
                 entity.discard();
+                state.untrackMob(id);
                 removed++;
             }
         }
         state.endHorde();
         return removed;
-    }
-
-    public static boolean isHordeMob(Entity entity) {
-        return entity.getTags().contains(HORDE_TAG);
     }
 }

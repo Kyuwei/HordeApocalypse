@@ -72,16 +72,22 @@ public class HordeState extends SavedData {
         hordeActive = true;
         hordeStartDay = day;
         hordeTicksRemaining = durationTicks;
-        hordeMobIds.clear();
         setDirty();
     }
 
-    /** Ends the horde but remembers {@link #hordeStartDay}, so the same night
-     * does not immediately trigger another one. */
+    public boolean isHordeMob(java.util.UUID id) {
+        return hordeMobIds.contains(id);
+    }
+
+    /**
+     * Ends the horde. {@link #hordeStartDay} is kept so the same night cannot
+     * trigger a second horde, and {@link #hordeMobIds} is kept so mobs that
+     * were out of reach (unloaded chunks) can still be destroyed when they
+     * load again — nothing else would ever remove them.
+     */
     public void endHorde() {
         hordeActive = false;
         hordeTicksRemaining = 0;
-        hordeMobIds.clear();
         setDirty();
     }
 

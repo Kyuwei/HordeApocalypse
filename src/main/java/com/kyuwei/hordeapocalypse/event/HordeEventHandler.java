@@ -5,6 +5,7 @@ import com.kyuwei.hordeapocalypse.config.ModConfig;
 import com.kyuwei.hordeapocalypse.spawner.HordeSpawner;
 import com.kyuwei.hordeapocalypse.state.HordeState;
 import com.kyuwei.hordeapocalypse.tracker.DayTracker;
+import com.kyuwei.hordeapocalypse.util.LevelTime;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
@@ -22,7 +23,6 @@ import java.util.Map;
  * sunrise, when daylight finishes off whatever the players did not.
  */
 public final class HordeEventHandler {
-    private static final int TICKS_PER_DAY = 24000;
     /** Time of day at which the sun is back up and the undead start burning. */
     private static final int DAWN = 23500;
 
@@ -37,7 +37,7 @@ public final class HordeEventHandler {
         if (tracker == null || overworld == null) return;
 
         HordeState state = HordeState.get(overworld);
-        long dayTime = Math.floorMod(overworld.getDayTime(), TICKS_PER_DAY);
+        long dayTime = LevelTime.timeOfDay(overworld);
 
         if (!state.hordeActive) {
             maybeStartHorde(server, overworld, state, tracker, dayTime);
