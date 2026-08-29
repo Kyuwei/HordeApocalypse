@@ -34,9 +34,7 @@ public class HordeApocalypse implements ModInitializer {
         HordeCommands.register();
 
         ServerEntityEvents.ENTITY_LOAD.register((entity, level) -> {
-            if (entity instanceof Mob mob && HordeSpawner.isHordeMob(mob)) {
-                if (!handleHordeMobLoad(mob, level)) return;
-            }
+            if (entity instanceof Mob mob && !handleHordeMobLoad(mob, level)) return;
             MobScalingHandler.applyScaling(entity, level);
         });
 
@@ -78,6 +76,8 @@ public class HordeApocalypse implements ModInitializer {
         if (overworld == null) return true;
 
         HordeState state = HordeState.get(overworld);
+        if (!state.isHordeMob(mob.getUUID())) return true;
+
         if (!state.hordeActive) {
             state.untrackMob(mob.getUUID());
             mob.discard();

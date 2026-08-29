@@ -2,7 +2,6 @@ package com.kyuwei.hordeapocalypse.ai;
 
 import com.kyuwei.hordeapocalypse.HordeApocalypse;
 import com.kyuwei.hordeapocalypse.config.ModConfig;
-import com.kyuwei.hordeapocalypse.spawner.HordeSpawner;
 import com.kyuwei.hordeapocalypse.tracker.DayTracker;
 import net.minecraft.core.BlockPos;
 import net.minecraft.tags.BlockTags;
@@ -52,8 +51,6 @@ public class BlockBreakGoal extends Goal {
 
     @Override
     public boolean canUse() {
-        if (!HordeSpawner.isHordeMob(mob)) return false;
-
         // Throttle on real game time: canUse() is not evaluated every tick, so
         // counting invocations would silently double every interval.
         long now = mob.level().getGameTime();
